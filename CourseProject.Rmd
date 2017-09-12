@@ -1,0 +1,140 @@
+---
+title: "Regression Models Course Project"
+author: "Yifan XIA"
+date: "11 Sep 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Executive summary
+Based on data collected from different cars, *Motor Trend* magazine investigated potential influences of car characteristics, in particular that of the transmission system, on its Mile Per Gallon (MPG). A regression analysis is performed through model selection and inferential analysis on each model's relevance. We found that a car's MPG strongly depends on its weight, number of cylinders, the transmission system, and the interaction thereof. Regarding the transmission system, our study concludes that manual transmission generally yields higher MPG than automatic one, although some exception may potentially exist.
+
+# Exploratory Data Analysis
+We start by loading the *mtcars* dataset and show first entries.
+```{r, echo=TRUE}
+data("mtcars"); head(mtcars, 3)
+```
+Several variables of numerics type are converted to factors (code not shown).
+```{r, echo=FALSE}
+mtcars$cyl <- as.factor(mtcars$cyl)
+mtcars$vs <- as.factor(mtcars$vs)
+mtcars$gear <- as.factor(mtcars$gear)
+mtcars$am <- as.factor(mtcars$am)
+mtcars$carb <- as.factor(mtcars$carb)
+```
+
+Next, we compute statistics of cars' **mpg** grouped by **am**:  
+
+* Mean MPG  
+```{r, echo=TRUE}
+aggregate(mtcars$mpg, by = list(mtcars$am), FUN = mean)
+```
+
+* Median MPG
+```{r, echo=TRUE}
+aggregate(mtcars$mpg, by = list(mtcars$am), FUN = median)
+```
+Both statistics suggest that manual transmission yields higher MPG. The same observation can be made from **Fig. 1** in **Appendix**.  
+
+# Inference
+A quick T-test confirms that the two transmission systems yield different MPGs:
+```{r, echo=TRUE}
+TTest <- t.test(mpg ~ am, data = mtcars); TTest$p.value
+```
+The resulting *p-value* is small ($<0.05$), suggesting that there is a non-zero difference between the two means. The variable MPG does not follow a normal distribution regardless of the transmission system.
+
+More inferential analyses will also be performed throughout the model selection process.
+
+# Regression and Linear Model Fitting
+We fit different linear models to the dataset and assess the robustness of each.
+1. The full model
+```{r,echo=TRUE,results='hide'}
+fullModel <- lm(formula = mpg ~ ., data = mtcars)
+summary(fullModel)
+```
+The results (not shown in the report) give the following observations:  
+1. $R^2=0.779$, suggesting that the full model explains $77.9\%$ of variations;  
+2. All coefficients have excessively large P-values ($>0.05$), suggesting none are statitcally significant.  
+
+We need to investigate other linear models.
+
+## Stepwise regression
+We apply a stepwise model selection by exact AIC algorithm. This method is arguably capable of selecting the "best" subset of regressor variables from a larger set.  
+```{r,echo=TRUE,results='hide'}
+require(MASS)
+stepA <- stepAIC(fullModel, direction = 'both', k = 2)
+summary(stepA)
+```
+The model selected by the algorithm AIC is mpg ~ cyl + hp + wt + am, with $R^2=0.8401$. However, the summary (not shown) suggests that not all coefficients are statistically significant (in particular *Intercept*). Therefore some diagnosis should be performed. We first look at the VIF of the retained model:
+```{r, echo=TRUE}
+require(car); vif(stepA)
+```
+It shows that **hp** and **wt** has similar variance inflation factor, implying they might be correlated. This can also be observed in **Fig. 2** in the Appendix. We decide to remove **hp** since the weight is a more commonly used characteristic. This figure show also a likely interaction between **wt** and **am** (Cars with automatic transmission are seemingly heavier). Thus an interaction term **wt:am** is added in the new model.
+
+The intercept, *i.e.* the mpg for a vehicle of zero weight, makes no practical sense and should be removed.  
+
+Our selected model is therefore: **mpg ~ cyl + wt + am + wt:am - 1**, *i.e.* a car's MPG depends strongly on its number of cylinders, weight, transmission and the interactions thereof.
+```{r,echo=TRUE,results='hide'}
+finalModel <- lm(mpg ~ cyl + wt + am + wt:am - 1, data = mtcars)
+summary(finalModel)$adj.r.squared
+```
+```{r,echo=TRUE}
+summary(finalModel)$coef
+```
+The selected model describes almost $99\%$ of variation in the outcome ($R^2=0.9879$), and all coefficients are statistically significant (maximum of P-value is $0.00885<0.05$). The model is a considerably satisfactory one, as one can see from **Fig. 4** in Appendix.
+
+## Residual diagnosis
+Some residual diagnosis is performed and plotted in **Fig. 3** in Appendix. We can draw the following conclusion:  
+1. The Residual vs. Fitted plot shows no remarquable pattern, suggesting independence between the two;  
+2. The Normal Q-Q plot shows the residuals are normally distributed;  
+3. The Scale-location plot shows randomly distributed points, confirming constant variance;  
+4. The Residuals vs. Leverage shows the absence of outlier.
+
+## Conclusion: Is an automatic or manual transmission better for MPG?
+In order to answer this question, we perform some simulations using the final model. We create a mock dataset that contains only two "dummy cars", whose characteristics are identical except the transmission system variable **am**.
+```{r,echo=FALSE}
+DummyCars <- subset(mtcars, mpg == max(mtcars$mpg))
+DummyCars <- DummyCars[,c('cyl','wt','am')]
+DummyCars <- DummyCars[rep(row.names(DummyCars),2),]
+row.names(DummyCars) <- c('Dummy.1', 'Dummy.2')
+DummyCars['Dummy.1', 'am'] <- 0
+```
+```{r,echo=TRUE}
+predictedMpg <- predict(finalModel, DummyCars, interval = 'confidence')
+cbind(DummyCars, predictedMpg)
+```
+The above results suggest:  
+1. Manual transmission is predicted to yield higher Mile Per Gallon (**fit** variable);  
+2. Statistically, the above conclusion could not be drawn with absolute certainty, as the confidence interval of *Dummy 1* overlaps (although slightly) that of *Dummy 2*.
+
+So the final conclusion is: manual transmission would in most cases yield higher MPG; however, some exceptions may exist.
+
+# Appendix: Figures
+## Figure 1: Boxplot of MPG
+```{r, echo=FALSE ,fig.height = 3, fig.width= 4, fig.align='center'}
+require(ggplot2)
+am1 <- mtcars$am
+levels(am1) <- c('Automatic','Manual')
+ggplot(mtcars, aes(am1, mpg))+geom_boxplot()
+```
+## Figure 2: Pair graph of **mpg ~ cyl + hp + wt + am** variables
+```{r, echo=FALSE,fig.height = 4, fig.width= 4, fig.align='center'}
+pairs(mtcars[c('mpg', 'cyl', 'hp', 'wt', 'am')], panel = panel.smooth, main = 'Pair graph of mtcars')
+```
+## Figure 3: Residual plots
+```{r, echo=FALSE}
+par(mfrow = c(2,2)); plot(finalModel)
+```
+
+## Figure 4: Prediction *vs.* Data
+```{r, echo=FALSE,fig.height=3, fig.width= 4, fig.align='center'}
+newdata <- mtcars[c('cyl', 'wt', 'am')]
+predictedMPG <- predict(finalModel, newdata)
+newdata['predictedMPG'] <- predictedMPG
+newdata['realMPG'] <-mtcars$mpg
+ggplot(newdata, aes(x=realMPG, y=predictedMPG))+geom_point()+geom_abline(slope = 1, intercept = 0, col = 'red')
+```
+The ideal linear relation *predictedMPG$=$realMPG* is plotted as reference.
